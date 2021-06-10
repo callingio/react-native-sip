@@ -1,0 +1,8 @@
+.DS_Store
+.git*
+.travis.yml
+.idea
+prettier.config.js
+tsconfig.json
+tslint.json
+src

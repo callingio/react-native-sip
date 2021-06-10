@@ -1,0 +1,13 @@
+language: node_js
+node_js:
+- '10'
+- '12'
+cache:
+  directories:
+  - node_modules
+script:
+- npm run lint
+- npm run build
+env:
+  global:
+  - COMMIT=${TRAVIS_COMMIT::8}
