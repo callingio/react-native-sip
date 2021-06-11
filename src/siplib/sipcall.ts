@@ -784,7 +784,7 @@ export class SipCall {
   isVideoOnMute = (): boolean => {
     return this._mediaDeviceStatus.video === MEDIA_DEVICE_STATUS_MUTE;
   };
-  startScreenShare = (): void => {
+  startScreenShare = (): boolean => {
     if (!this.isSessionActive()) {
       throw new Error('RtcSession is not active');
     }
@@ -793,29 +793,10 @@ export class SipCall {
         `Start Screenshare is not allowed when call status is ${this.getCallStatus()}`,
       );
     }
-    this._mediaEngine.startScreenCapture(this.getId()).then((mediaStream) => {
-      if (mediaStream) {
-        const peerConn = this._peerConnection;
-        mediaStream.getVideoTracks().forEach((track) => {
-          peerConn?.getSenders().forEach((sender) => {
-            if (sender.track && sender.track.kind === 'video') {
-              sender.replaceTrack(track);
-            }
-          });
-        });
-        this._shareScreen = true;
-        // send the event to app event handler
-        const ssTrack = mediaStream.getVideoTracks()[0];
-        ssTrack.addEventListener('ended', () => {
-          if (this._shareScreen) {
-            this.stopScreenShare();
-          }
-        });
-        this._eventEmitter.emit('call.update', {'call': this});
-      }
-    });
+    // not implemented
+    return false;
   };
-  stopScreenShare = (): void => {
+  stopScreenShare = (): boolean => {
     if (!this.isSessionActive()) {
       throw new Error('RtcSession is not active');
     }
@@ -827,21 +808,8 @@ export class SipCall {
     if (!this._shareScreen) {
       throw new Error('Screen share session is not active');
     }
-    this._shareScreen = false;
-    this._mediaEngine.stopScreenCapture(this.getId(), true).then((mediaStream) => {
-      if (mediaStream) {
-        const peerConn = this._peerConnection;
-        mediaStream.getVideoTracks().forEach((track) => {
-          peerConn?.getSenders().forEach((sender) => {
-            if (sender.track && sender.track.kind === 'video') {
-              sender.replaceTrack(track);
-            }
-          });
-        });
-        // send the event to app event handler
-        this._eventEmitter.emit('call.update', {'call': this});
-      }
-    });
+    // not implemented
+    return false;
   };
   toggleScreenShare = () => {
     if (this._shareScreen) {

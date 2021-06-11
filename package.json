@@ -18,6 +18,7 @@
     },
     "keywords": [
         "react",
+        "react-native",
         "sip",
         "jssip",
         "webrtc"
@@ -36,7 +37,9 @@
     "homepage": "https://github.com/callingio/react-native-sip",
     "dependencies": {
         "react-native": "^0.63.3",
-        "react-native-jssip": "^3.7.6"
+        "react-native-incall-manager": "^3.3.0",
+        "react-native-jssip": "^3.7.6",
+        "react-native-webrtc": "^1.89.3"
     },
     "peerDependencies": {},
     "devDependencies": {
