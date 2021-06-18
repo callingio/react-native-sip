@@ -1,4 +1,5 @@
 import { mediaDevices } from 'react-native-webrtc';
+import InCallManager from 'react-native-incall-manager'
 import {
   VIDEO_RES_QVGA,
   VIDEO_RES_VGA,
@@ -72,6 +73,8 @@ export class MediaEngine {
   _outStreamContexts: OutputStreamContext[];
   _isPlaying: boolean;
   _supportedDeviceTypes: string[];
+  _sessionType: string;  // audio or video
+  _isSessionActive: boolean;
   _eventEmitter: EventEmitter;
 
   constructor(eventEmitter: EventEmitter) {
@@ -83,11 +86,53 @@ export class MediaEngine {
     this._outputVolume = 0.8;  // default 80%
     this._inputVolume = 1; // 100 %
     this._ringVolume = 0.8;
-    this._videoRes = VIDEO_RES_720P;
+    this._videoRes = VIDEO_RES_VGA;
+    this._sessionType = 'none';
+    this._isSessionActive = false;
     this._eventEmitter = eventEmitter;
     this._prepareConfig(null);
     this._initDevices();
   }
+  startSession = (media: string, playRingback: boolean=false, tonePath: string=''): boolean => {
+    if (this._isSessionActive) {
+      let ringbackTone = '';
+      if (playRingback === true) {
+        ringbackTone = tonePath === '' ? '_DEFAULT_' : tonePath;
+      }
+      InCallManager.start({media: media, auto: true, ringback: ringbackTone});
+      this._sessionType = media;
+      this._isSessionActive = true;
+    }
+    return true;
+  }
+  // tone - busy tone
+  stopSession = (playBusytone: boolean=false) => {
+    if (this._isSessionActive) {
+      let busyTone = '';
+      if (playBusytone === true) {
+        busyTone = '_DEFAULT_';
+      }
+      InCallManager.stop({busyTone});
+      this._sessionType = 'none';
+      this._isSessionActive = false;
+    }
+  }
+  stopRingbackTone = (): void => {
+    InCallManager.stopRingback();
+  };
+  startRingTone = (tonePath: string=''): void => {
+    const ringTone = tonePath === '' ? '_DEFAULT_' : tonePath;
+    InCallManager.startRingtone(ringTone)
+  };
+  stopRingTone = (): void => {
+    InCallManager.stopRingtone();
+  };
+  muteAudio = (): void => {
+    this._enableAudioChannels(false);
+  };
+  unMuteAudio = (): void => {
+    this._enableAudioChannels(true);
+  };
 
   // Fetch available devices for a given 'device kind'
   availableDevices = (deviceKind: 'audioinput' | 'audiooutput' | 'videoinput'): MediaDevice[] => {
@@ -111,16 +156,23 @@ export class MediaEngine {
     // tslint:disable-next-line:no-console
     // console.log(this._availableDevices);
     const opts = this._getMediaConstraints(audio, video);
+    console.log(opts);
     // todo: failure scenarios like user cancel the permissions
     return mediaDevices.getUserMedia(opts).then((mediaStream) => {
+      const newStream = new MediaStream();
+      mediaStream.getTracks().forEach((track) => {
+        console.log(track);
+        newStream.addTrack(track);
+      });
       this._inStreamContexts.push({
         id: reqId,
         hasVideo: video,
-        stream: mediaStream,
+        stream: newStream,
         volume: this._inputVolume
       });
-      return Promise.resolve(mediaStream);
+      return Promise.resolve(newStream);
     }).catch((err) => {
+      console.log(err);
       return Promise.resolve(null);
     });
   };
@@ -134,9 +186,26 @@ export class MediaEngine {
       const streamContext = this._inStreamContexts[index];
       const appStream = streamContext.stream;
       streamContext.hasVideo = video;
+      if (audio) {
+        appStream.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+          track.stop();
+          appStream.removeTrack(track);
+        });
+      }
+      if (video) {
+        appStream.getVideoTracks().forEach((track) => {
+          track.enabled = false;
+          track.stop();
+          appStream.removeTrack(track);
+        });
+      }
       const opts = this._getMediaConstraints(audio, video);
       return mediaDevices.getUserMedia(opts).then((mediaStream) => {
-        streamContext.stream = mediaStream;
+        // currently update is used for video
+        mediaStream.getVideoTracks().forEach((track) => {
+          appStream.addTrack(track);
+        });
         return Promise.resolve(appStream);
       });
     }
@@ -145,7 +214,15 @@ export class MediaEngine {
   closeStream = (reqId: string): void => {
     const index = this._inStreamContexts.findIndex((item) => item.id === reqId);
     if (index !== -1) {
+      const streamContext = this._inStreamContexts[index];
+      const mediaStream = streamContext.stream;
+      mediaStream.getTracks().forEach((track) => {
+        track.enabled = false;
+        track.stop();
+        mediaStream.removeTrack(track);
+      });
       this._inStreamContexts.splice(index, 1);
+
     }
     // out stream context
     const outIndex = this._outStreamContexts.findIndex(
@@ -156,6 +233,12 @@ export class MediaEngine {
   };
   closeAll = () => {
     // close all opened streams
+    this._inStreamContexts.forEach((streamContext) => {
+      streamContext.stream.getTracks().forEach((track) => {
+        track.enabled = false;
+        track.stop();
+      });
+    });
     this._inStreamContexts = [];
     this._outStreamContexts = [];
     this._isPlaying = false;
@@ -169,6 +252,11 @@ export class MediaEngine {
     const outContext = this._outStreamContexts.find((item) => item.id === reqId);
     // if valid add the track
     if (mediaStream) {
+      const trackExists = mediaStream.getTracks().find((t) => t.id === track.id);
+      if (trackExists) {
+        mediaStream.removeTrack(trackExists);
+      }
+      mediaStream.addTrack(track);
       // new context
       if (outContext === undefined) {
         if (track.kind === 'audio') {
@@ -180,18 +268,6 @@ export class MediaEngine {
         }
       }
     }
-  };
-  muteAudio = (): void => {
-    this._enableAudioChannels(false);
-  };
-  unMuteAudio = (): void => {
-    this._enableAudioChannels(true);
-  };
-  playTone = (name: string): any => {
-    return true;
-  };
-  stopTone = (name: string): any => {
-    return true;
   };
   // change output volume
   // used only for initial volume
@@ -474,6 +550,7 @@ export class MediaEngine {
       throw Error(`Mute Audio`);
     });
   };
+
   // TODO: check the all configured devices exists or not
   _isAudioEnabled = (): boolean => {
     // @ts-ignore
@@ -486,9 +563,11 @@ export class MediaEngine {
   _refreshDevices = (): void => {
     const channels = [ 'audioinput', 'audiooutput', 'videoinput' ];
     const deviceList: MediaDeviceInfo[] = [];
+    console.log("Before enumerate devices");
     mediaDevices.enumerateDevices()
       .then((devices) => {
         devices.forEach((deviceInfo) => {
+          console.log(deviceInfo);
           const isSupported = channels.includes(deviceInfo.kind);
           if (isSupported) {
             deviceList.push(deviceInfo);
@@ -557,7 +636,8 @@ export class MediaEngine {
       .catch((err) => {
         // log error
         // tslint:disable-next-line:no-console
-        console.log(`Enumerate devices error ${err.cause}`);
+        console.log(`Enumerate devices error`);
+        console.log(err);
       })
   };
   _initDevices = (): void => {
@@ -588,6 +668,9 @@ export class MediaEngine {
       } else if (this._videoRes === VIDEO_RES_VGA) {
         width = 640;
         height = 480;
+      } else if (this._videoRes === VIDEO_RES_720P) {
+        width = 1280;
+        height = 720;
       } else if (this._videoRes === VIDEO_RES_1080P) {
         width = 1920;
         height = 1080;

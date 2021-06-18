@@ -1,3 +1,18 @@
+import {
+  RTCPeerConnection,
+  // @ts-ignore
+  RTCIceCandidate,
+  // @ts-ignore
+  RTCSessionDescription,
+  // @ts-ignore
+  RTCView,
+  MediaStream,
+  MediaStreamTrack,
+  // @ts-ignore
+  mediaDevices,
+  // @ts-ignore
+  registerGlobals,
+} from "react-native-webrtc";
 import * as JsSIP from 'react-native-jssip';
 import * as EventEmitter from 'events';
 import * as sdpTransform from 'sdp-transform';
@@ -163,11 +178,14 @@ export class SipCall {
     if (isIncoming === true) {
       this.setCallStatus(CALL_STATUS_RINGING);
       this._direction = CALL_DIRECTION_INCOMING;
+      /*
       const toneNameOrObj = this._callConfig.getSetting?.('call-ringing-tone', {
         call: this
       }, ()=>'ringing') ?? 'ringing';
-      this._tones['ringing'] = this._mediaEngine.playTone(toneNameOrObj);
+       */
+      this._mediaEngine.startRingTone();
     } else {
+      console.log("SIP Call created for outgoing");
       this.remoteUser = this.remoteName;
       this.setCallStatus(CALL_STATUS_DIALING);
       this._direction = CALL_DIRECTION_OUTGOING;
@@ -339,7 +357,7 @@ export class SipCall {
   };
   _configureDebug = (): void => {
     if (this._debug) {
-      JsSIP.debug.enable(this._debugNamespaces || 'JsSIP:*');
+      // JsSIP.debug.enable(this._debugNamespaces || 'JsSIP:*');
       this._logger = console;
     } else {
       JsSIP.debug.disable();
@@ -361,14 +379,21 @@ export class SipCall {
           hasAudio: boolean, // has audio
           hasVideo: boolean,
           appEventHandler: AppCallEventHandler): void => {
+    let media = 'audio';
     if (hasVideo) {
+      media = 'video';
       this._hasLocalVideo = true;
     }
     this._appEventHandler = appEventHandler;
+    console.log("Inside SIP Call dial");
+    // start a media session
+    this._mediaEngine.startSession(media, true, '');
+    console.log("Started ringback media session");
     this._mediaEngine.openStreams(this.getId(), hasAudio, hasVideo).then((stream) => {
       if (!stream) {
         throw Error('Failed to open the input streams');
       }
+      console.log("Opened media stream");
       const opts = {
         mediaConstraints: {
           audio: hasAudio,
@@ -376,8 +401,6 @@ export class SipCall {
         },
         mediaStream: stream,
         rtcOfferConstraints: {
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true,
           iceRestart: false
         },
         pcConfig: this.getRTCConfig(),
@@ -396,8 +419,9 @@ export class SipCall {
           'input.stream.opened',
           {
             obj: this,
-            audio: (stream.getAudioTracks().length > 0),
-            video: (stream.getVideoTracks().length > 0)
+            audio: hasAudio,
+            video: hasVideo
+
           }
         );
       }
@@ -420,18 +444,23 @@ export class SipCall {
     if (hasVideo) {
       this._hasLocalVideo = true;
     }
+    const mediaType = hasVideo === true ? 'video' : 'audio';
     this._appEventHandler = appEventHandler;
+    // stop the ringtone and start a session
+    this._mediaEngine.stopRingTone();
+    this._mediaEngine.startSession(mediaType);
 
     this._mediaEngine.openStreams(this.getId(), hasAudio, hasVideo).then((inputStream) => {
       // attach input stream to HTML media elements
       // @ts-ignore
       const stream: MediaStream = inputStream;
+      console.log(stream.getTracks());
       const options = {
         // if extra headers are required for a provider then enable it using config
         extraHeaders: this.getExtraHeaders().resp2xx,
         mediaConstraints: {
           audio: true,
-          video: true,
+          video: hasVideo,
         },
         pcConfig: this.getRTCConfig(),
         mediaStream: stream,
@@ -441,14 +470,14 @@ export class SipCall {
       this.getRTCSession()!.answer(options);
       this.setCallStatus(CALL_STATUS_CONNECTING);
       this._setInputMediaStream(inputStream);
-      this._mediaEngine.stopTone(this._tones['ringing'] || 'ringing');
+
       if (this._appEventHandler) {
         this._appEventHandler(
           'input.stream.opened',
           {
             obj: this,
-            audio: (inputStream!.getAudioTracks().length > 0),
-            video: (inputStream!.getVideoTracks().length > 0)
+            audio: hasAudio,
+            video: hasVideo
           }
         );
       }
@@ -465,6 +494,7 @@ export class SipCall {
         `Calling reject() is not allowed when call status is ${this.getCallStatus()}`,
       );
     }
+    this._mediaEngine.stopRingTone();
     // Terminate options
     const options = {
       extraHeaders: this.getExtraHeaders().resp4xx,
@@ -472,7 +502,6 @@ export class SipCall {
       reason_phrase: reason,
     };
     this.getRTCSession()!.terminate(options);
-    this._mediaEngine.stopTone(this._tones['ringing'] || 'ringing');
   };
 
   // HANGUP
@@ -497,17 +526,14 @@ export class SipCall {
     // close the input stream
     this._mediaEngine.closeStream(this.getId());
     this._setInputMediaStream(null);
+    this._mediaEngine.stopSession();
     if (this._appEventHandler) {
       this._appEventHandler(
         'input.stream.closed',
         { obj: this }
       );
     }
-    if (this.getCallStatus() === CALL_STATUS_PROGRESS) {
-      this._mediaEngine.stopTone('ringback');
-    }
   };
-
   // send DTMF
   sendDTMF = (tones: string ): void => {
     if (!this.isSessionActive()) {
@@ -533,7 +559,6 @@ export class SipCall {
     };
     this.getRTCSession()!.sendDTMF(tones, options);
   };
-
   // Send INFO
   sendInfo = (contentType: string, body?: string): void => {
     if (!this.isSessionActive()) {
@@ -550,7 +575,6 @@ export class SipCall {
     };
     this.getRTCSession()!.sendInfo(contentType, body, options);
   };
-
   hold = (): void => {
     if (!this.isSessionActive()) {
       this._logger.error("RTCSession is not active");
@@ -575,7 +599,6 @@ export class SipCall {
     };
     this.getRTCSession()!.hold(options);
   };
-
   unhold = (): void => {
     if (!this.isSessionActive()) {
       this._logger.error('RTC Session is not valid');
@@ -1110,19 +1133,17 @@ export class SipCall {
       this.setPeerConnection(data.peerconnection);
       data.peerconnection.addEventListener('track', (event: RTCTrackEvent) => {
         // tslint:disable-next-line:no-console
-        console.log('ON track event');
+        console.log('ON track event received');
         this._logger.debug('PeerConnection "ontrack" event received');
         this._handleRemoteTrack(event.track);
         this._eventEmitter.emit('call.update', {'call': this});
       })
-      /*
       data.peerconnection.addEventListener('addstream', (event) => {
         // tslint:disable-next-line:no-console
-        console.log("add stream event");
+        console.log("On add stream event recieved");
         this._logger.debug('PeerConnection "addstream" event received');
-        this._mediaEngine.startOutputStream(this._outputMediaStream);
+        // this._mediaEngine.startOutputStream(this._outputMediaStream);
       })
-       */
     });
     // CONNECTING EVENT
     rtcSession!.on('connecting', (data) => {
@@ -1142,7 +1163,8 @@ export class SipCall {
       this._logger.debug('RTCSession "progress" event received', data)
       if(this.getCallStatus() === CALL_STATUS_DIALING) {
         this.setCallStatus(CALL_STATUS_PROGRESS);
-        this._mediaEngine.playTone('ringback');
+        // TODO: ringback is set when media is started
+        this._mediaEngine.startSession('',true);
         this._eventEmitter.emit('call.update', {'call': this});
       }
     });
@@ -1155,7 +1177,7 @@ export class SipCall {
         this.startTime = rtcSession?.start_time.toString();
       }
       this.setCallStatus(CALL_STATUS_CONNECTING);
-      this._mediaEngine.stopTone('ringback');
+      this._mediaEngine.stopRingbackTone();
       this._eventEmitter.emit('call.update', {'call': this});
     });
     rtcSession!.on('confirmed', (data) => {
@@ -1191,9 +1213,9 @@ export class SipCall {
       }
       this._endType = 'hangup';
       if (this.getCallStatus() === CALL_STATUS_RINGING) {
-        this._mediaEngine.stopTone(this._tones['ringing'] || 'ringing');
+        this._mediaEngine.stopRingTone();
       } else if(this.getCallStatus() === CALL_STATUS_PROGRESS) {
-        this._mediaEngine.stopTone('ringback');
+        this._mediaEngine.stopSession(true);
       }
       this.setCallStatus(CALL_STATUS_IDLE);
       this.setMediaSessionStatus(MEDIA_SESSION_STATUS_IDLE);
@@ -1219,9 +1241,9 @@ export class SipCall {
         );
       }
       if (this.getCallStatus() === CALL_STATUS_RINGING) {
-        this._mediaEngine.stopTone(this._tones['ringing'] || 'ringing');
+        this._mediaEngine.stopRingTone();
       } else if(this.getCallStatus() === CALL_STATUS_PROGRESS) {
-        this._mediaEngine.stopTone('ringback');
+        this._mediaEngine.stopSession(true);
       }
       this._endType = 'failure';
       this._errorCause = `${originator}: ${reason}`;
@@ -1322,29 +1344,22 @@ export class SipCall {
       // TODO Handle Replaces for Transfer
     });
     rtcSession!.on('sdp', (data) => {
-      this._logger.debug('RTCSession "sdp" event received', data)
-      // tslint:disable-next-line:no-console
-      // console.log("ON session SDP event");
+      this._logger.debug('RTCSession SDP event received', data)
+      /*
       const { originator, type, sdp } = data;
-      // tslint:disable-next-line:no-console
-      // console.log(originator);
       if (originator === 'remote') {
-        // tslint:disable-next-line:no-console
-        // console.log(sdp);
         if (type === 'answer') {
           this._handleRemoteAnswer(sdp);
         } else if (type === 'offer') {
           this._handleRemoteOffer(sdp);
         }
       } else {
-        // tslint:disable-next-line:no-console
-        // console.log(sdp);
-        // local sdp
         const modified = this._handleLocalSdp(sdp);
         if (this._modifySdp) {
           data.sdp = modified;
         }
       }
+       */
     });
     rtcSession!.on('icecandidate', (data) => {
       this._logger.debug('RTCSession "icecandidate" event received', data)

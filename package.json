@@ -36,10 +36,12 @@
     },
     "homepage": "https://github.com/callingio/react-native-sip",
     "dependencies": {
-        "react-native": "^0.63.3",
+        "react": "17.0.1",
+        "react-native": "0.64.2",
         "react-native-incall-manager": "^3.3.0",
         "react-native-jssip": "^3.7.6",
-        "react-native-webrtc": "^1.89.3"
+        "react-native-webrtc": "^1.89.3",
+        "sdp-transform": "^2.14.1"
     },
     "peerDependencies": {},
     "devDependencies": {
@@ -48,7 +50,6 @@
         "@types/webrtc": "0.0.26",
         "prettier": "^2.1.1",
         "prettier-check": "^2.0.0",
-        "react": "^16.13.1",
         "rimraf": "^3.0.2",
         "tslint": "^6.1.3",
         "tslint-config-prettier": "^1.15.0",
